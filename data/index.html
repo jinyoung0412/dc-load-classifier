@@ -1,0 +1,486 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>DC Load Classifier</title>
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=Share+Tech+Mono&family=Rajdhani:wght@400;600;700&display=swap');
+
+  :root {
+    --bg:        #0a0c0f;
+    --panel:     #0f1318;
+    --border:    #1e2530;
+    --accent:    #00e5ff;
+    --accent2:   #ff6b35;
+    --green:     #39ff14;
+    --text:      #c8d6e5;
+    --text-dim:  #4a5568;
+    --resistive: #39ff14;
+    --motor:     #00e5ff;
+    --electronic:#ff6b35;
+  }
+
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+
+  body {
+    background: var(--bg);
+    color: var(--text);
+    font-family: 'Rajdhani', sans-serif;
+    font-size: 15px;
+    min-height: 100vh;
+    overflow-x: hidden;
+  }
+
+  /* 배경 그리드 */
+  body::before {
+    content: '';
+    position: fixed;
+    inset: 0;
+    background-image:
+      linear-gradient(rgba(0,229,255,0.03) 1px, transparent 1px),
+      linear-gradient(90deg, rgba(0,229,255,0.03) 1px, transparent 1px);
+    background-size: 40px 40px;
+    pointer-events: none;
+    z-index: 0;
+  }
+
+  .layout {
+    position: relative;
+    z-index: 1;
+    display: grid;
+    grid-template-columns: 280px 1fr;
+    grid-template-rows: 56px 1fr;
+    height: 100vh;
+    gap: 0;
+  }
+
+  /* 헤더 */
+  header {
+    grid-column: 1 / -1;
+    display: flex;
+    align-items: center;
+    padding: 0 24px;
+    border-bottom: 1px solid var(--border);
+    background: rgba(10,12,15,0.95);
+    backdrop-filter: blur(8px);
+    gap: 16px;
+  }
+
+  .logo {
+    font-family: 'Share Tech Mono', monospace;
+    font-size: 13px;
+    color: var(--accent);
+    letter-spacing: 2px;
+    text-transform: uppercase;
+  }
+
+  .logo span { color: var(--text-dim); }
+
+  .status-dot {
+    width: 8px; height: 8px;
+    border-radius: 50%;
+    background: var(--text-dim);
+    margin-left: auto;
+    transition: background 0.3s;
+  }
+  .status-dot.connected { background: var(--green); box-shadow: 0 0 8px var(--green); }
+
+  .status-label {
+    font-family: 'Share Tech Mono', monospace;
+    font-size: 11px;
+    color: var(--text-dim);
+    letter-spacing: 1px;
+  }
+
+  /* 사이드바 */
+  aside {
+    border-right: 1px solid var(--border);
+    padding: 20px;
+    display: flex;
+    flex-direction: column;
+    gap: 16px;
+    overflow-y: auto;
+    background: var(--panel);
+  }
+
+  .section-label {
+    font-family: 'Share Tech Mono', monospace;
+    font-size: 10px;
+    color: var(--text-dim);
+    letter-spacing: 2px;
+    text-transform: uppercase;
+    margin-bottom: 8px;
+  }
+
+  /* MOSFET 제어 버튼 */
+  .ctrl-btn {
+    width: 100%;
+    padding: 14px;
+    border: 1px solid;
+    border-radius: 4px;
+    font-family: 'Share Tech Mono', monospace;
+    font-size: 13px;
+    letter-spacing: 2px;
+    cursor: pointer;
+    transition: all 0.15s;
+    background: transparent;
+  }
+
+  .btn-on {
+    border-color: var(--green);
+    color: var(--green);
+  }
+  .btn-on:hover, .btn-on.active {
+    background: var(--green);
+    color: var(--bg);
+    box-shadow: 0 0 20px rgba(57,255,20,0.3);
+  }
+
+  .btn-off {
+    border-color: var(--accent2);
+    color: var(--accent2);
+  }
+  .btn-off:hover {
+    background: var(--accent2);
+    color: var(--bg);
+    box-shadow: 0 0 20px rgba(255,107,53,0.3);
+  }
+
+  /* 분류 결과 */
+  .result-box {
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    padding: 16px;
+    background: rgba(255,255,255,0.02);
+  }
+
+  .result-label {
+    font-size: 22px;
+    font-weight: 700;
+    letter-spacing: 1px;
+    color: var(--text-dim);
+    transition: color 0.3s;
+    margin-bottom: 12px;
+  }
+  .result-label.Resistive { color: var(--resistive); text-shadow: 0 0 12px rgba(57,255,20,0.4); }
+  .result-label.Motor     { color: var(--motor);     text-shadow: 0 0 12px rgba(0,229,255,0.4); }
+  .result-label.Electronic{ color: var(--electronic);text-shadow: 0 0 12px rgba(255,107,53,0.4); }
+
+  .feature-row {
+    display: flex;
+    justify-content: space-between;
+    padding: 5px 0;
+    border-bottom: 1px solid var(--border);
+    font-size: 13px;
+  }
+  .feature-row:last-child { border-bottom: none; }
+  .feature-key { color: var(--text-dim); font-family: 'Share Tech Mono', monospace; font-size: 11px; }
+  .feature-val { color: var(--accent); font-family: 'Share Tech Mono', monospace; font-size: 11px; }
+
+  /* 메인 영역 */
+  main {
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+  }
+
+  /* 파형 차트 */
+  .chart-area {
+    flex: 1;
+    padding: 20px;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+  }
+
+  canvas#waveform {
+    width: 100%;
+    flex: 1;
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    background: rgba(0,0,0,0.4);
+    display: block;
+  }
+
+  /* 히스토리 로그 */
+  .history-area {
+    height: 200px;
+    border-top: 1px solid var(--border);
+    padding: 12px 20px;
+    overflow-y: auto;
+    background: rgba(0,0,0,0.3);
+  }
+
+  .history-area::-webkit-scrollbar { width: 4px; }
+  .history-area::-webkit-scrollbar-track { background: transparent; }
+  .history-area::-webkit-scrollbar-thumb { background: var(--border); border-radius: 2px; }
+
+  .log-row {
+    display: grid;
+    grid-template-columns: 80px 120px 1fr;
+    gap: 12px;
+    padding: 4px 0;
+    border-bottom: 1px solid rgba(30,37,48,0.5);
+    font-family: 'Share Tech Mono', monospace;
+    font-size: 11px;
+    animation: fadeIn 0.3s ease;
+  }
+
+  @keyframes fadeIn { from { opacity: 0; transform: translateY(-4px); } to { opacity: 1; transform: translateY(0); } }
+
+  .log-time  { color: var(--text-dim); }
+  .log-label { font-weight: 600; }
+  .log-label.Resistive  { color: var(--resistive); }
+  .log-label.Motor      { color: var(--motor); }
+  .log-label.Electronic { color: var(--electronic); }
+  .log-label.Unknown    { color: var(--text-dim); }
+  .log-detail { color: var(--text-dim); }
+
+  /* 스캔라인 효과 */
+  .chart-area::after {
+    content: '';
+    position: absolute;
+    left: 0; right: 0;
+    height: 2px;
+    background: rgba(0,229,255,0.1);
+    animation: scan 3s linear infinite;
+    pointer-events: none;
+  }
+
+  @keyframes scan {
+    0%   { top: 56px; }
+    100% { top: calc(100vh - 200px); }
+  }
+</style>
+</head>
+<body>
+<div class="layout">
+
+  <header>
+    <div class="logo">DC<span>/</span>LOAD<span>-</span>CLASSIFIER</div>
+    <div style="margin-left:auto; display:flex; align-items:center; gap:8px;">
+      <div class="status-dot" id="statusDot"></div>
+      <span class="status-label" id="statusLabel">DISCONNECTED</span>
+    </div>
+  </header>
+
+  <aside>
+    <div>
+      <div class="section-label">MOSFET Control</div>
+      <div style="display:flex; flex-direction:column; gap:8px;">
+        <button class="ctrl-btn btn-on"  id="btnOn"  onclick="sendCmd('ON')">▶ LOAD ON</button>
+        <button class="ctrl-btn btn-off" id="btnOff" onclick="sendCmd('OFF')">■ LOAD OFF</button>
+      </div>
+    </div>
+
+    <div>
+      <div class="section-label">Classification Result</div>
+      <div class="result-box">
+        <div class="result-label" id="resultLabel">---</div>
+        <div class="feature-row">
+          <span class="feature-key">PEAK</span>
+          <span class="feature-val" id="fPeak">-</span>
+        </div>
+        <div class="feature-row">
+          <span class="feature-key">STEADY</span>
+          <span class="feature-val" id="fSteady">-</span>
+        </div>
+        <div class="feature-row">
+          <span class="feature-key">SETTLING</span>
+          <span class="feature-val" id="fSettling">-</span>
+        </div>
+        <div class="feature-row">
+          <span class="feature-key">STD DEV</span>
+          <span class="feature-val" id="fStdDev">-</span>
+        </div>
+      </div>
+    </div>
+  </aside>
+
+  <main>
+    <div class="chart-area" style="position:relative;">
+      <div class="section-label">Real-time Waveform — Current (mA)</div>
+      <canvas id="waveform"></canvas>
+    </div>
+
+    <div class="history-area">
+      <div class="section-label" style="margin-bottom:8px;">Measurement History</div>
+      <div id="historyLog"></div>
+    </div>
+  </main>
+
+</div>
+
+<script>
+  // WebSocket 연결 및 UI 제어
+
+  const WS_URL = `ws://${location.hostname}/ws`;
+  const WAVEFORM_MAX_POINTS = 300;  // 화면에 표시할 최대 샘플 수
+
+  let ws = null;
+  let waveformData = [];
+  let animFrameId = null;
+
+  // Canvas 초기화
+  const canvas = document.getElementById('waveform');
+  const ctx = canvas.getContext('2d');
+
+  function resizeCanvas() {
+    const rect = canvas.parentElement.getBoundingClientRect();
+    canvas.width  = rect.width  - 40;
+    canvas.height = rect.height - 40;
+  }
+  window.addEventListener('resize', () => { resizeCanvas(); drawWaveform(); });
+  resizeCanvas();
+
+  // 파형 그리기
+  function drawWaveform() {
+    const W = canvas.width;
+    const H = canvas.height;
+    ctx.clearRect(0, 0, W, H);
+
+    if (waveformData.length < 2) {
+      ctx.fillStyle = 'rgba(74,85,104,0.3)';
+      ctx.font = '12px Share Tech Mono';
+      ctx.textAlign = 'center';
+      ctx.fillText('AWAITING SIGNAL...', W / 2, H / 2);
+      return;
+    }
+
+    const max = Math.max(...waveformData, 1);
+    const min = Math.min(...waveformData, 0);
+    const range = max - min || 1;
+    const pad = 20;
+
+    // 그리드 라인
+    ctx.strokeStyle = 'rgba(30,37,48,0.8)';
+    ctx.lineWidth = 1;
+    for (let i = 0; i <= 4; i++) {
+      const y = pad + (H - pad * 2) * (i / 4);
+      ctx.beginPath();
+      ctx.moveTo(0, y);
+      ctx.lineTo(W, y);
+      ctx.stroke();
+
+      // Y축 레이블
+      const val = max - (range * i / 4);
+      ctx.fillStyle = 'rgba(74,85,104,0.8)';
+      ctx.font = '10px Share Tech Mono';
+      ctx.textAlign = 'left';
+      ctx.fillText(val.toFixed(1) + 'mA', 4, y - 3);
+    }
+
+    // 파형
+    ctx.beginPath();
+    ctx.strokeStyle = '#00e5ff';
+    ctx.lineWidth = 1.5;
+    ctx.shadowColor = '#00e5ff';
+    ctx.shadowBlur = 6;
+
+    waveformData.forEach((v, i) => {
+      const x = (i / (waveformData.length - 1)) * W;
+      const y = pad + (H - pad * 2) * (1 - (v - min) / range);
+      i === 0 ? ctx.moveTo(x, y) : ctx.lineTo(x, y);
+    });
+    ctx.stroke();
+    ctx.shadowBlur = 0;
+
+    // 파형 아래 그라데이션
+    const grad = ctx.createLinearGradient(0, 0, 0, H);
+    grad.addColorStop(0, 'rgba(0,229,255,0.15)');
+    grad.addColorStop(1, 'rgba(0,229,255,0)');
+    ctx.lineTo(W, H);
+    ctx.lineTo(0, H);
+    ctx.closePath();
+    ctx.fillStyle = grad;
+    ctx.fill();
+  }
+
+  // WebSocket 연결
+  function connectWS() {
+    ws = new WebSocket(WS_URL);
+
+    ws.onopen = () => {
+      document.getElementById('statusDot').classList.add('connected');
+      document.getElementById('statusLabel').textContent = 'CONNECTED';
+    };
+
+    ws.onclose = () => {
+      document.getElementById('statusDot').classList.remove('connected');
+      document.getElementById('statusLabel').textContent = 'DISCONNECTED';
+      setTimeout(connectWS, 3000);  // 3초 후 재연결
+    };
+
+    ws.onmessage = (e) => {
+      const msg = JSON.parse(e.data);
+
+      if (msg.type === 'current') {
+        // 실시간 전류값 수신
+        waveformData.push(msg.value);
+        if (waveformData.length > WAVEFORM_MAX_POINTS) waveformData.shift();
+        cancelAnimationFrame(animFrameId);
+        animFrameId = requestAnimationFrame(drawWaveform);
+
+      } else if (msg.type === 'result') {
+        // 분류 결과 수신
+        const label = msg.label;
+        const el = document.getElementById('resultLabel');
+        el.textContent = label;
+        el.className = 'result-label ' + label;
+
+        document.getElementById('fPeak').textContent    = msg.peak.toFixed(2)    + ' mA';
+        document.getElementById('fSteady').textContent  = msg.steady.toFixed(2)  + ' mA';
+        document.getElementById('fSettling').textContent= msg.settling.toFixed(1)+ ' ms';
+        document.getElementById('fStdDev').textContent  = msg.std_dev.toFixed(3) + ' mA';
+
+        // 수집 완료 후 파형 초기화
+        waveformData = [];
+
+      } else if (msg.type === 'history') {
+        // 히스토리 전체 갱신
+        renderHistory(msg.entries);
+      }
+    };
+  }
+
+  // MOSFET 제어 명령 전송
+  function sendCmd(cmd) {
+    if (!ws || ws.readyState !== WebSocket.OPEN) return;
+    ws.send(cmd);
+    if (cmd === 'ON') {
+      waveformData = [];
+      document.getElementById('btnOn').classList.add('active');
+    } else {
+      document.getElementById('btnOn').classList.remove('active');
+    }
+  }
+
+  // 히스토리 렌더링
+  function renderHistory(entries) {
+    const log = document.getElementById('historyLog');
+    log.innerHTML = '';
+    // 최신 항목이 위로 오도록 역순 렌더링
+    [...entries].reverse().forEach(entry => {
+      const row = document.createElement('div');
+      row.className = 'log-row';
+      row.innerHTML = `
+        <span class="log-time">${entry.timestamp}</span>
+        <span class="log-label ${entry.label}">${entry.label}</span>
+        <span class="log-detail">
+          P:${entry.peak.toFixed(1)}mA
+          S:${entry.steady.toFixed(1)}mA
+          T:${entry.settling.toFixed(0)}ms
+          σ:${entry.std_dev.toFixed(2)}
+        </span>
+      `;
+      log.appendChild(row);
+    });
+  }
+
+  // 초기화
+  connectWS();
+  drawWaveform();
+</script>
+</body>
+</html>
