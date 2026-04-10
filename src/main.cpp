@@ -12,21 +12,24 @@ AsyncWebSocket ws("/ws");
 HistoryEntry history[HISTORY_MAX];
 int history_count = 0;
 
+// 웹 버튼으로 수집 요청 플래그
+bool collect_requested = false;
+
 // 데이터 수집 설정
-#define SAMPLE_DURATION_MS   3000   // 부하 ON 후 수집 시간 (ms)
-#define COOLDOWN_MS          3000   // 부하 OFF 후 대기 시간 (ms)
-#define MAX_SAMPLES          2000   // 최대 샘플 수 (ESP32 SRAM 여유분 기준)
+#define SAMPLE_DURATION_MS   5000
+#define COOLDOWN_MS          3000
+#define MAX_SAMPLES          2000
 
 // 수집 버퍼
-float sample_buf[MAX_SAMPLES];      // 전류 샘플 배열 (mA)
-uint32_t timestamp_buf[MAX_SAMPLES]; // 타임스탬프 배열 (ms)
+float sample_buf[MAX_SAMPLES];
+uint32_t timestamp_buf[MAX_SAMPLES];
 int sample_count = 0;
 
 // 동작 모드
 enum class Mode {
-    IDLE,       // 대기
-    COLLECTING, // 데이터 수집 중
-    DUMPING     // 시리얼 전송 중
+    IDLE,
+    COLLECTING,
+    DUMPING
 };
 Mode current_mode = Mode::IDLE;
 
@@ -40,7 +43,7 @@ struct Features {
 };
 
 Features extract_features(float *buf, uint32_t *ts, int count) {
-    // TODO: 납땜 후 실제 파형 확인하고 구현
+    // TODO: 실제 파형 확인 후 구현
     Features f = {0.0f, 0.0f, 0.0f, 0.0f};
     return f;
 }
@@ -69,21 +72,20 @@ void run_collection_cycle() {
         sample_buf[sample_count] = ina219_read_current_mA();
         timestamp_buf[sample_count] = millis() - start;
         sample_count++;
-
-        // WebSocket으로 실시간 전송
-        ws_send_current(sample_buf[sample_count - 1]);
     }
 
     mosfet_off();
     current_mode = Mode::DUMPING;
 
-    // 시리얼 전송
     serial_dump();
+
+    // 수집 완료 후 파형 일괄 전송
+    ws_send_waveform(sample_buf, timestamp_buf, sample_count);
 
     // Feature 추출 (stub)
     Features f = extract_features(sample_buf, timestamp_buf, sample_count);
 
-    // 분류 결과 전송 (stub: 납땜 후 ML 연동 시 교체)
+    // 분류 결과 전송 (stub: ML 연동 시 교체)
     String label = "Unknown";
     ws_send_result(label, f.peak_current, f.steady_current, f.settling_time, f.std_dev);
     history_add(label, f.peak_current, f.steady_current, f.settling_time, f.std_dev);
@@ -113,6 +115,8 @@ void setup() {
 void loop() {
     ws.cleanupClients();
 
-    // 현재는 자동 수집 루프 비활성화 (웹 버튼으로 제어)
-    // run_collection_cycle() 은 WebSocket 명령으로 트리거됨
+    if (collect_requested) {
+        collect_requested = false;
+        run_collection_cycle();
+    }
 }

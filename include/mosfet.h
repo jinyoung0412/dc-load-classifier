@@ -2,7 +2,7 @@
 #include <Arduino.h>
 
 // MOSFET 제어 핀 (LR7843 모듈 IN 핀)
-#define MOSFET_PIN 26
+#define MOSFET_PIN 5
 
 // MOSFET 초기화
 inline void mosfet_init() {
