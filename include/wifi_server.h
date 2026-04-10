@@ -4,10 +4,8 @@
 #include <ESPAsyncWebServer.h>
 #include <ArduinoJson.h>
 #include "mosfet.h"
-
-// WiFi 인증 정보 (실제 값으로 교체)
-#define WIFI_SSID "your_ssid"
-#define WIFI_PASSWORD "your_password"
+#include "secrets.h"
+#include <WiFiMulti.h>
 
 // 웹 서버 포트
 #define WEB_SERVER_PORT 80
@@ -21,12 +19,12 @@ extern AsyncWebSocket ws;
 
 // 측정 히스토리 항목
 struct HistoryEntry {
-    String timestamp;       // 측정 시각
-    String label;           // 분류 결과 (Resistive / Motor / Electronic)
-    float peak_current;     // 최대 돌입 전류 (mA)
-    float steady_current;   // 정상 상태 평균 전류 (mA)
-    float settling_time;    // 안정화 소요 시간 (ms)
-    float std_dev;          // 정상 상태 표준편차 (mA)
+    String timestamp;
+    String label;
+    float peak_current;
+    float steady_current;
+    float settling_time;
+    float std_dev;
 };
 
 extern HistoryEntry history[HISTORY_MAX];
@@ -34,9 +32,12 @@ extern int history_count;
 
 // WiFi 연결
 inline void wifi_connect() {
-    WiFi.begin(WIFI_SSID, WIFI_PASSWORD);
+    WiFiMulti wifiMulti;
+    wifiMulti.addAP(WIFI_SSID_1, WIFI_PASSWORD_1);
+    wifiMulti.addAP(WIFI_SSID_2, WIFI_PASSWORD_2);
+
     Serial.print("WiFi 연결 중");
-    while (WiFi.status() != WL_CONNECTED) {
+    while (wifiMulti.run() != WL_CONNECTED) {
         delay(500);
         Serial.print(".");
     }
@@ -53,11 +54,10 @@ inline void on_ws_event(AsyncWebSocket *server, AsyncWebSocketClient *client,
     } else if (type == WS_EVT_DISCONNECT) {
         Serial.printf("WebSocket 클라이언트 해제: %u\n", client->id());
     } else if (type == WS_EVT_DATA) {
-        // 클라이언트로부터 MOSFET 제어 명령 수신
         String msg = String((char *)data).substring(0, len);
         if (msg == "ON") {
-            mosfet_on();
-            Serial.println("MOSFET ON (웹 명령)");
+            extern bool collect_requested;
+            collect_requested = true;
         } else if (msg == "OFF") {
             mosfet_off();
             Serial.println("MOSFET OFF (웹 명령)");
@@ -96,14 +96,12 @@ inline void ws_send_result(const String &label, float peak, float steady,
 inline void history_add(const String &label, float peak, float steady,
                         float settling, float std_dev) {
     if (history_count >= HISTORY_MAX) {
-        // 가장 오래된 항목 제거 (앞으로 당기기)
         for (int i = 0; i < HISTORY_MAX - 1; i++) {
             history[i] = history[i + 1];
         }
         history_count = HISTORY_MAX - 1;
     }
 
-    // 타임스탬프 생성 (ESP32 가동 시간 기준)
     unsigned long ms = millis();
     unsigned long sec = ms / 1000;
     unsigned long min = sec / 60;
@@ -112,12 +110,12 @@ inline void history_add(const String &label, float peak, float steady,
     snprintf(ts, sizeof(ts), "%02lu:%02lu:%02lu", hr, min % 60, sec % 60);
 
     history[history_count] = {
-        .timestamp     = String(ts),
-        .label         = label,
-        .peak_current  = peak,
-        .steady_current= steady,
-        .settling_time = settling,
-        .std_dev       = std_dev
+        .timestamp      = String(ts),
+        .label          = label,
+        .peak_current   = peak,
+        .steady_current = steady,
+        .settling_time  = settling,
+        .std_dev        = std_dev
     };
     history_count++;
 }
@@ -144,15 +142,41 @@ inline void ws_send_history() {
 
 // 웹 서버 라우팅 및 시작
 inline void server_init() {
-    // 대시보드 HTML 서빙
     server.on("/", HTTP_GET, [](AsyncWebServerRequest *request) {
         request->send(SPIFFS, "/index.html", "text/html");
     });
 
-    // WebSocket 등록
     ws.onEvent(on_ws_event);
     server.addHandler(&ws);
 
     server.begin();
     Serial.println("웹 서버 시작");
+}
+
+inline void ws_cleanupClients() {
+    ws.cleanupClients();
+}
+
+// 수집 완료 후 전체 파형 데이터 일괄 전송
+// 수집 완료 후 전체 파형 데이터 일괄 전송
+inline void ws_send_waveform(float *buf, uint32_t *ts, int count) {
+    if (ws.count() == 0) return;
+
+    // 최대 300포인트로 다운샘플링
+    int step = max(1, count / 300);
+
+    // 힙에 할당 (스택 오버플로우 방지)
+    DynamicJsonDocument doc(8192);
+    doc["type"] = "waveform";
+    JsonArray arr = doc.createNestedArray("data");
+
+    for (int i = 0; i < count; i += step) {
+        JsonObject obj = arr.createNestedObject();
+        obj["t"] = ts[i];
+        obj["v"] = buf[i];
+    }
+
+    String json;
+    serializeJson(doc, json);
+    ws.textAll(json);
 }
